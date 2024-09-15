@@ -5,6 +5,9 @@ import logging
 import typing as t
 from dataclasses import dataclass, field
 
+import os
+import jlib
+
 import numpy as np
 from langchain_core.pydantic_v1 import BaseModel, Field
 
@@ -246,7 +249,7 @@ class Faithfulness(MetricWithLLM, SingleTurnMetric):
         else:
             logger.warning("No statements were generated from the answer.")
             score = np.nan
-
+        print(f"JJJJ: _compute_score: faithful_statements = {faithful_statements} / num_statements = {num_statements} - score = {score}")
         return score
 
     async def _single_turn_ascore(
@@ -261,33 +264,87 @@ class Faithfulness(MetricWithLLM, SingleTurnMetric):
         """
         assert self.llm is not None, "LLM is not set"
 
-        p_value = self._create_statements_prompt(row)
-        statements = await self.llm.generate(
-            p_value,
-            callbacks=callbacks,
-        )
-        statements = await _statements_output_parser.aparse(
-            statements.generations[0][0].text, p_value, self.llm, self.max_retries
-        )
+        p_value = self._create_statements_prompt(row)  # p_value.prompt_str
 
-        if statements is None:
-            return np.nan
+        # Jagdev - 
+        question = row['question']
+        print(f"EVALUATING FAITHFULLNESS FOR QUESTION: {question}")
+        enc_ques = jlib.encode_string(question)
+        statement_prompt_file = f"{enc_ques}-statement_prompt.txt"
+        statement_answer_file = f"{enc_ques}-statement_answer.txt"
 
-        statements = [item["simpler_statements"] for item in statements.dicts()]
-        statements = [item for sublist in statements for item in sublist]
+        #Save statement prompt
+        jlib.save_data(statement_prompt_file, p_value.prompt_str, subdir='faith', overwrite=False)
+
+        #Check if statement answer exists or not. 
+        statements = jlib.read_data(statement_answer_file, subdir='faith', datatype='json')
+
+        if not statements:
+            #TODO:  This is default llm, mostly ChatGPT to generate statements. can overwrite other llm
+            statements = await self.llm.generate(
+                p_value,
+                callbacks=callbacks,
+            )
+            statements = await _statements_output_parser.aparse(
+                statements.generations[0][0].text, p_value, self.llm, self.max_retries
+            )
+
+            if statements is None:
+                return np.nan
+
+            statements = [item["simpler_statements"] for item in statements.dicts()]
+            statements = [item for sublist in statements for item in sublist]
+
+            # Save the statements
+            statement_str = json.dumps(statements, indent=3, default=str)
+            jlib.save_data(statement_answer_file, statement_str, subdir='faith', overwrite=False)
 
         assert isinstance(statements, t.List), "statements must be a list"
 
         p_value = self._create_nli_prompt(row, statements)
-        nli_result = await self.llm.generate(
-            p_value,
-            callbacks=callbacks,
-            n=self._reproducibility,
-        )
 
-        nli_result_text = [
-            nli_result.generations[0][i].text for i in range(self._reproducibility)
-        ]
+        #Jagdev - save second nli prompt
+        nli_prompt_file = f"{enc_ques}-nli_prompt.txt"
+        jlib.save_data(nli_prompt_file, p_value.prompt_str, subdir='faith', overwrite=False)
+
+        #Jagdev - overwrite LLM to generate nli_prompt response which is used to calculate faithfullness score. 
+        faith_llm = os.environ.get("FAITH_LLM", "default") #default/openai,  cerebras, bedrock_llama, etc
+        #token_limit = int(os.environ.get("TOKEN_LIMIT", "0"))
+        nli_answer_file = f"{enc_ques}-nli_answer-{faith_llm}.txt"
+        print(f"USING FAITH_LLM = {faith_llm} to get the nli response. nli_answer_file: {nli_answer_file}")
+        if faith_llm in ["openai", "default"]:
+            nli_result = await self.llm.generate(
+                p_value,
+                callbacks=callbacks,
+                n=self._reproducibility,
+            )
+
+            nli_result_text = [
+                nli_result.generations[0][i].text for i in range(self._reproducibility)
+            ]
+
+            # Save response
+            nli_answer_str = json.dumps(nli_result_text, indent=3, default=str)
+            # overwrite is True - as the score is based on this response.
+            jlib.save_data(nli_answer_file, nli_answer_str, subdir='faith', overwrite=True)
+        elif faith_llm == "bedrock_llama":
+            model_id = os.environ.get("LLM_MODEL_ID", "meta.llama3-1-70b-instruct-v1:0")
+            nli_result = jlib.Bedrock_Meta_Llama(model_id, p_value.prompt_str)
+            nli_result_text = [nli_result]
+            # Save response
+            jlib.save_data(nli_answer_file, nli_result, subdir='faith', overwrite=True)
+        elif faith_llm == "cerebras":
+            model_id = os.environ.get("LLM_MODEL_ID", "llama3.1-70b")
+            nli_result = jlib.CerebrasLLM(model_id, p_value.prompt_str)
+            nli_result_text = [nli_result]
+            # Save response
+            jlib.save_data(nli_answer_file, nli_result, subdir='faith', overwrite=True)
+        else:
+            print(f"ERROR - LLM {faith_llm} is not defined")
+            return np.nan
+
+        #Jagdev - set self.max_retries to 0 as DEFAULT LLM/OpenAI will get used again if there is any error parsing response
+        self.max_retries = 0
         faithfulness_list = [
             await _faithfulness_output_parser.aparse(
                 text, p_value, self.llm, self.max_retries
