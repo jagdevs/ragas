@@ -1,15 +1,19 @@
 [project]
 name = "ragas"
 dependencies = [
-    "numpy",
-    "datasets",
-    "tiktoken",
-    "langchain",
-    "langchain-core",
-    "langchain-community",
-    "langchain_openai",
-    "openai>1",
+    "numpy==1.26.4",
+    "datasets==2.21.0",
+    "tiktoken==0.7.0",
+    "langchain==0.2.14",
+    "langchain-core==0.2.38",
+    "langchain-community==0.2.12",
+    "langchain_openai==0.1.23",
+    "langchain-aws==0.1.17",
+    "openai==1.44.0",
     "pysbd>=0.3.4",
+    "nest-asyncio",
+    "pydantic==2.9.0",
+    "pydantic_core==2.23.2",
     "nest-asyncio",
     "appdirs",
 ]
@@ -17,12 +21,12 @@ dynamic = ["version", "readme"]
 
 [project.optional-dependencies]
 all = [
-    "sentence-transformers",
-    "transformers",
-    "nltk",
+    "sentence-transformers==3.0.1",
+    "transformers==4.44.2",
+    "nltk==3.9.1",
     "rouge_score",
     "fuzzywuzzy",
-    "rapidfuzz",
+    "rapidfuzz==3.9.6",
 ]
 
 [tool.setuptools]

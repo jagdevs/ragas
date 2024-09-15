@@ -6,7 +6,7 @@ import typing as t
 from dataclasses import dataclass, field
 
 import os
-import jlib
+import ragas.metrics.jlib as jlib
 
 import numpy as np
 from langchain_core.pydantic_v1 import BaseModel, Field
@@ -263,11 +263,10 @@ class Faithfulness(MetricWithLLM, SingleTurnMetric):
         returns the NLI score for each (q, c, a) pair
         """
         assert self.llm is not None, "LLM is not set"
-
         p_value = self._create_statements_prompt(row)  # p_value.prompt_str
 
         # Jagdev - 
-        question = row['question']
+        question = row['user_input']
         print(f"EVALUATING FAITHFULLNESS FOR QUESTION: {question}")
         enc_ques = jlib.encode_string(question)
         statement_prompt_file = f"{enc_ques}-statement_prompt.txt"
